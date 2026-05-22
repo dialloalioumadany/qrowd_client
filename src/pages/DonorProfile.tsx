@@ -1,6 +1,6 @@
 import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion';
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Plus, CheckCircle, Heart, LogOut, ArrowUpRight, Lock, Camera, Target, BookOpen, Droplets, TreePine, Globe } from 'lucide-react';
+import { ArrowLeft, Plus, CheckCircle, Heart, LogOut, Lock, Camera, Target, BookOpen, Droplets, TreePine, Globe } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useInView } from '@/hooks/useInView';

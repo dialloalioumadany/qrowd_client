@@ -218,4 +218,22 @@ export const CAMPAIGNS = [
   },
 ];
 
-export type Campaign = typeof CAMPAIGNS[0];
+export interface Campaign {
+  id: string;
+  category: string;
+  title: string;
+  subtitle: string;
+  heroImg: string;
+  raised: number;
+  goal: number;
+  donors: number;
+  daysLeft: number;
+  ngoName: string;
+  ngoCountry: string;
+  description: string[];
+  quote: string;
+  quoteAuthor: string;
+  breakdown: { label: string; pct: number }[];
+  gallery: string[];
+  ngoLogo?: string | null;
+}

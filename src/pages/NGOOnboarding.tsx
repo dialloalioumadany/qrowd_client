@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState, useRef } from 'react';
-import { ArrowLeft, ArrowRight, CheckCircle, Upload, Plus, X } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { ArrowLeft, ArrowRight, CheckCircle, Upload, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const BG = '#183028';
@@ -14,24 +14,190 @@ const STEPS = [
   { num: 4, label: 'Réseaux sociaux' },
 ];
 
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+
 export default function NGOOnboarding() {
   const navigate = useNavigate();
+  const { token, user, loading: authLoading } = useAuth();
+  const toast = useToast();
+  
+  useEffect(() => {
+    if (authLoading) return;
+    if (!token) {
+      navigate('/login');
+    }
+  }, [token, authLoading, navigate]);
+
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(1);
   const [bannerPreview, setBannerPreview] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [docs, setDocs] = useState<string[]>([]);
   const bannerInput = useRef<HTMLInputElement>(null);
   const logoInput = useRef<HTMLInputElement>(null);
+
+  const [formData, setFormData] = useState({
+    name: '',
+    mission: '',
+    description: '',
+    category: '',
+    country: 'Sénégal',
+    website: '',
+    linkedin: '',
+    facebook: '',
+    twitter: '',
+    instagram: '',
+    email: '',
+    phone: '',
+  });
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const goTo = (next: number) => {
     setDirection(next > step ? 1 : -1);
     setStep(next);
   };
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>, setter: (v: string) => void) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'banner') => {
     const file = e.target.files?.[0];
-    if (file) setter(URL.createObjectURL(file));
+    if (file) {
+      const url = URL.createObjectURL(file);
+      if (type === 'logo') {
+        setLogoPreview(url);
+        setLogoFile(file);
+      } else {
+        setBannerPreview(url);
+        setBannerFile(file);
+      }
+    }
+  };
+
+  const uploadImage = async (file: File, folder: string): Promise<string> => {
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      fd.append('folder', folder);
+
+      const res = await fetch('http://localhost:5000/api/upload/image', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: fd
+      });
+
+      const data = await res.json();
+      if (res.status === 503 || !res.ok) {
+        console.warn("L'upload image a échoué ou ImageKit n'est pas configuré. Utilisation du fallback...");
+        return folder === 'org_logo'
+          ? 'https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?q=80&w=200&auto=format&fit=crop'
+          : 'https://images.unsplash.com/photo-1509062522246-3755977927d7?q=80&w=1200&auto=format&fit=crop';
+      }
+      return data.data.url;
+    } catch (err) {
+      console.warn("Erreur d'upload, fallback...", err);
+      return folder === 'org_logo'
+        ? 'https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?q=80&w=200&auto=format&fit=crop'
+        : 'https://images.unsplash.com/photo-1509062522246-3755977927d7?q=80&w=1200&auto=format&fit=crop';
+    }
+  };
+
+  const handleSubmit = async () => {
+    setIsSubmitting(true);
+    setError(null);
+
+    // Front-end validation
+    if (!formData.name.trim()) {
+      const errMsg = "Le nom de l'organisation est requis.";
+      setError(errMsg);
+      toast.error(errMsg);
+      setIsSubmitting(false);
+      goTo(1); // Retour à l'étape présentation
+      return;
+    }
+    if (!formData.description.trim()) {
+      const errMsg = "La description de l'organisation est requise.";
+      setError(errMsg);
+      toast.error(errMsg);
+      setIsSubmitting(false);
+      goTo(1); // Retour à l'étape présentation
+      return;
+    }
+
+    const toastId = toast.loading("Enregistrement de votre profil ONG...");
+
+    try {
+      let finalLogoUrl = 'https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?q=80&w=200&auto=format&fit=crop';
+      let finalCoverUrl = 'https://images.unsplash.com/photo-1509062522246-3755977927d7?q=80&w=1200&auto=format&fit=crop';
+
+      if (logoFile) {
+        finalLogoUrl = await uploadImage(logoFile, 'org_logo');
+      }
+      if (bannerFile) {
+        finalCoverUrl = await uploadImage(bannerFile, 'org_cover');
+      }
+
+      const payload = {
+        name: formData.name,
+        email: formData.email.trim() || user?.email || 'association@qrowd.org',
+        description: formData.description,
+        mission: formData.mission || null,
+        logo: finalLogoUrl,
+        coverImage: finalCoverUrl,
+        website: formData.website || null,
+        phone: formData.phone || null,
+        address: {
+          street: 'Rue du Siège',
+          city: 'Dakar',
+          country: formData.country || 'Sénégal',
+        },
+        socialLinks: {
+          facebook: formData.facebook || null,
+          twitter: formData.twitter || null,
+          instagram: formData.instagram || null,
+          linkedin: formData.linkedin || null,
+        },
+        documents: docs.map(label => {
+          let type: 'statuts' | 'recepisse' | 'rapport' | 'autre' = 'autre';
+          if (label === 'Statuts officiels') type = 'statuts';
+          if (label === 'Récépissé de déclaration') type = 'recepisse';
+          if (label === 'Rapport d\'activités') type = 'rapport';
+          return {
+            name: label,
+            url: `/uploads/${type}.pdf`,
+            type
+          };
+        })
+      };
+
+      const res = await fetch('http://localhost:5000/api/organizations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || "Une erreur est survenue lors de l'enregistrement de l'organisation.");
+      }
+
+      toast.success("Votre profil ONG a été configuré avec succès !", { id: toastId });
+      navigate('/ngo/profile');
+    } catch (err: any) {
+      console.error(err);
+      const errMsg = err.message || "Erreur de connexion.";
+      setError(errMsg);
+      toast.error(errMsg, { id: toastId });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const progress = ((step + 1) / STEPS.length) * 100;
@@ -41,6 +207,17 @@ export default function NGOOnboarding() {
     center: { x: 0, opacity: 1 },
     exit: (dir: number) => ({ x: dir > 0 ? '-100%' : '100%', opacity: 0 }),
   };
+
+  if (authLoading) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: OFFWHITE }}>
+        <div className="text-center">
+          <span className="text-[28px] font-bold" style={{ color: BG }}>Qrowd</span>
+          <p className="text-[11px] font-bold tracking-[0.25em] text-[#bbb] mt-3">CHARGEMENT DU PORTAIL ONG...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex" style={{ backgroundColor: BG }}>
@@ -136,7 +313,7 @@ export default function NGOOnboarding() {
                   {/* Banner upload */}
                   <div className="mb-8">
                     <p className="text-[11px] font-bold tracking-[0.15em] uppercase text-[#aaa] mb-3">Bannière de couverture</p>
-                    <input ref={bannerInput} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e, setBannerPreview)} />
+                    <input ref={bannerInput} type="file" accept="image/*" className="hidden" onChange={(e) => handleFileChange(e, 'banner')} />
                     <button onClick={() => bannerInput.current?.click()}
                       className="w-full rounded-2xl border-2 border-dashed transition-all hover:border-[#aaa] overflow-hidden"
                       style={{ borderColor: '#ddd', backgroundColor: '#fafaf6', aspectRatio: '16/5', position: 'relative' }}
@@ -160,7 +337,7 @@ export default function NGOOnboarding() {
                   {/* Logo upload */}
                   <div>
                     <p className="text-[11px] font-bold tracking-[0.15em] uppercase text-[#aaa] mb-3">Logo / Photo de profil</p>
-                    <input ref={logoInput} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e, setLogoPreview)} />
+                    <input ref={logoInput} type="file" accept="image/*" className="hidden" onChange={(e) => handleFileChange(e, 'logo')} />
                     <div className="flex items-center gap-6">
                       <button onClick={() => logoInput.current?.click()}
                         className="w-24 h-24 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-all hover:border-[#aaa] overflow-hidden shrink-0"
@@ -196,34 +373,36 @@ export default function NGOOnboarding() {
                     <p className="text-[14px] text-[#999] leading-relaxed">Ces informations apparaîtront sur votre page de profil public.</p>
                   </div>
 
-                  {[
-                    { label: "Nom officiel de l'ONG", placeholder: "Lumières du Sahel", type: "text" },
-                    { label: "Slogan ou tagline", placeholder: "Éduquer pour transformer", type: "text" },
-                  ].map(f => (
-                    <div key={f.label}>
-                      <label className="block text-[11px] font-bold tracking-[0.15em] uppercase text-[#aaa] mb-3">{f.label}</label>
-                      <div className="border-b-2 border-[#ddd] pb-2 focus-within:border-[#183028] transition-colors">
-                        <input type={f.type} placeholder={f.placeholder} className="w-full bg-transparent text-[16px] text-[#1a1a1a] outline-none placeholder-[#ccc]" />
-                      </div>
+                  <div>
+                    <label className="block text-[11px] font-bold tracking-[0.15em] uppercase text-[#aaa] mb-3">Nom officiel de l'ONG</label>
+                    <div className="border-b-2 border-[#ddd] pb-2 focus-within:border-[#183028] transition-colors">
+                      <input type="text" placeholder="Lumières du Sahel" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full bg-transparent text-[16px] text-[#1a1a1a] outline-none placeholder-[#ccc]" />
                     </div>
-                  ))}
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold tracking-[0.15em] uppercase text-[#aaa] mb-3">Slogan ou tagline</label>
+                    <div className="border-b-2 border-[#ddd] pb-2 focus-within:border-[#183028] transition-colors">
+                      <input type="text" placeholder="Éduquer pour transformer" value={formData.mission} onChange={e => setFormData({ ...formData, mission: e.target.value })} className="w-full bg-transparent text-[16px] text-[#1a1a1a] outline-none placeholder-[#ccc]" />
+                    </div>
+                  </div>
 
                   <div>
                     <label className="block text-[11px] font-bold tracking-[0.15em] uppercase text-[#aaa] mb-3">Catégorie</label>
                     <div className="flex flex-wrap gap-2">
-                      {['Éducation & Enfance', 'Santé', 'Environnement', 'Humanitaire', 'Droits humains', 'Eau & Alimentation'].map(cat => (
-                        <button key={cat}
-                          className="px-4 py-2 rounded-full text-[12px] font-semibold border-2 transition-all hover:scale-105"
-                          style={{ borderColor: '#e0e0da', color: '#888' }}
-                          onClick={e => {
-                            const btn = e.currentTarget;
-                            const active = btn.style.backgroundColor === BG;
-                            btn.style.backgroundColor = active ? 'transparent' : BG;
-                            btn.style.color = active ? '#888' : LIME;
-                            btn.style.borderColor = active ? '#e0e0da' : BG;
-                          }}
-                        >{cat}</button>
-                      ))}
+                      {['Éducation & Enfance', 'Santé', 'Environnement', 'Humanitaire', 'Droits humains', 'Eau & Alimentation'].map(cat => {
+                        const active = formData.category === cat;
+                        return (
+                          <button key={cat} type="button"
+                            className="px-4 py-2 rounded-full text-[12px] font-semibold border-2 transition-all hover:scale-105"
+                            style={active
+                              ? { backgroundColor: BG, color: LIME, borderColor: BG }
+                              : { borderColor: '#e0e0da', color: '#888', backgroundColor: 'transparent' }
+                            }
+                            onClick={() => setFormData({ ...formData, category: active ? '' : cat })}
+                          >{cat}</button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -231,24 +410,28 @@ export default function NGOOnboarding() {
                     <label className="block text-[11px] font-bold tracking-[0.15em] uppercase text-[#aaa] mb-3">Description de la mission</label>
                     <div className="border-b-2 border-[#ddd] pb-2 focus-within:border-[#183028] transition-colors">
                       <textarea rows={4} placeholder="Décrivez votre mission, vos valeurs et vos actions sur le terrain..."
+                        value={formData.description}
+                        onChange={e => setFormData({ ...formData, description: e.target.value.slice(0, 500) })}
                         className="w-full bg-transparent text-[15px] text-[#1a1a1a] outline-none placeholder-[#ccc] resize-none leading-relaxed"
                       />
                     </div>
-                    <p className="text-[11px] text-[#ccc] mt-2">Maximum 500 caractères</p>
+                    <p className="text-[11px] text-[#ccc] mt-2">{formData.description.length} / 500 caractères</p>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    {[
-                      { label: "Pays du siège social", placeholder: "Sénégal" },
-                      { label: "Année de fondation", placeholder: "2021" },
-                    ].map(f => (
-                      <div key={f.label}>
-                        <label className="block text-[11px] font-bold tracking-[0.15em] uppercase text-[#aaa] mb-3">{f.label}</label>
-                        <div className="border-b-2 border-[#ddd] pb-2 focus-within:border-[#183028] transition-colors">
-                          <input type="text" placeholder={f.placeholder} className="w-full bg-transparent text-[16px] text-[#1a1a1a] outline-none placeholder-[#ccc]" />
-                        </div>
+                    <div>
+                      <label className="block text-[11px] font-bold tracking-[0.15em] uppercase text-[#aaa] mb-3">Pays du siège social</label>
+                      <div className="border-b-2 border-[#ddd] pb-2 focus-within:border-[#183028] transition-colors">
+                        <input type="text" placeholder="Sénégal" value={formData.country} onChange={e => setFormData({ ...formData, country: e.target.value })} className="w-full bg-transparent text-[16px] text-[#1a1a1a] outline-none placeholder-[#ccc]" />
                       </div>
-                    ))}
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold tracking-[0.15em] uppercase text-[#aaa] mb-3">Année de fondation</label>
+                      <div className="border-b-2 border-[#ddd] pb-2 focus-within:border-[#183028] transition-colors">
+                        <input type="text" placeholder="2021" className="w-full bg-transparent text-[16px] text-[#1a1a1a] outline-none placeholder-[#ccc]" />
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -319,24 +502,36 @@ export default function NGOOnboarding() {
 
                   <div className="flex flex-col gap-7">
                     {[
-                      { label: 'Site web', placeholder: 'https://lumieresdusahel.org', icon: '🌐' },
-                      { label: 'LinkedIn', placeholder: 'https://linkedin.com/company/...', icon: '💼' },
-                      { label: 'Facebook', placeholder: 'https://facebook.com/...', icon: '📘' },
-                      { label: 'Instagram', placeholder: '@lumieresdusahel', icon: '📷' },
-                      { label: 'Email de contact public', placeholder: 'contact@lumieresdusahel.org', icon: '✉️' },
-                      { label: 'Numéro de téléphone', placeholder: '+221 XX XXX XX XX', icon: '📞' },
+                      { label: 'Site web', placeholder: 'https://lumieresdusahel.org', icon: '🌐', key: 'website' },
+                      { label: 'LinkedIn', placeholder: 'https://linkedin.com/company/...', icon: '💼', key: 'linkedin' },
+                      { label: 'Facebook', placeholder: 'https://facebook.com/...', icon: '📘', key: 'facebook' },
+                      { label: 'Instagram', placeholder: '@lumieresdusahel', icon: '📷', key: 'instagram' },
+                      { label: 'Email de contact public', placeholder: 'contact@lumieresdusahel.org', icon: '✉️', key: 'email' },
+                      { label: 'Numéro de téléphone', placeholder: '+221 XX XXX XX XX', icon: '📞', key: 'phone' },
                     ].map(f => (
                       <div key={f.label} className="flex items-center gap-4">
                         <span className="text-[22px] shrink-0">{f.icon}</span>
                         <div className="flex-1">
                           <label className="block text-[11px] font-bold tracking-[0.12em] uppercase text-[#aaa] mb-2">{f.label}</label>
                           <div className="border-b-2 border-[#ddd] pb-1.5 focus-within:border-[#183028] transition-colors">
-                            <input type="text" placeholder={f.placeholder} className="w-full bg-transparent text-[15px] text-[#1a1a1a] outline-none placeholder-[#ccc]" />
+                            <input
+                              type="text"
+                              placeholder={f.placeholder}
+                              value={formData[f.key as keyof typeof formData]}
+                              onChange={e => setFormData({ ...formData, [f.key]: e.target.value })}
+                              className="w-full bg-transparent text-[15px] text-[#1a1a1a] outline-none placeholder-[#ccc]"
+                            />
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="mt-8 p-4 bg-red-950/20 border border-red-500/30 text-red-700 text-[13px] font-medium">
+                  {error}
                 </div>
               )}
 
@@ -347,7 +542,7 @@ export default function NGOOnboarding() {
         {/* Bottom nav */}
         <div className="flex items-center justify-between px-6 md:px-12 lg:px-16 py-5 border-t border-[#e0e0da] shrink-0">
           <button onClick={() => goTo(Math.max(0, step - 1))}
-            disabled={step === 0}
+            disabled={step === 0 || isSubmitting}
             className="flex items-center gap-2 text-[12px] font-bold tracking-[0.12em] transition-all disabled:opacity-30"
             style={{ color: '#888' }}
           >
@@ -370,11 +565,11 @@ export default function NGOOnboarding() {
               SUIVANT <ArrowRight size={14} />
             </motion.button>
           ) : (
-            <motion.button onClick={() => navigate('/ngo/profile')} whileHover={{ scale: 1.04 }}
-              className="flex items-center gap-2 px-6 py-3.5 rounded-full text-[12px] font-bold tracking-[0.12em] transition-all"
+            <motion.button onClick={handleSubmit} whileHover={{ scale: 1.04 }} disabled={isSubmitting}
+              className="flex items-center gap-2 px-6 py-3.5 rounded-full text-[12px] font-bold tracking-[0.12em] transition-all disabled:opacity-50"
               style={{ backgroundColor: LIME, color: BG }}
             >
-              <CheckCircle size={14} /> TERMINER
+              <CheckCircle size={14} /> {isSubmitting ? 'ENREGISTREMENT...' : 'TERMINER'}
             </motion.button>
           )}
         </div>

@@ -3,6 +3,7 @@ import { useState, useRef } from 'react';
 import { ArrowLeft, Eye, EyeOff, RefreshCw, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 const BG       = '#183028';
 const LIME     = '#cde877';
@@ -11,7 +12,7 @@ const API      = 'http://localhost:5000/api';
 
 const itemAnim = {
   hidden: { opacity: 0, y: 20 },
-  show:   { opacity: 1, y: 0, transition: { duration: 0.55, ease: [0.25, 0.46, 0.45, 0.94] } },
+  show:   { opacity: 1, y: 0, transition: { duration: 0.55, ease: [0.25, 0.46, 0.45, 0.94] as any } },
 };
 const containerAnim = {
   hidden: {},
@@ -40,8 +41,10 @@ function InputLine({ focused, children }: { focused: boolean; children: React.Re
 /* ══════════════════════════════════════════════════════
    Étape 1 — Formulaire d'inscription
 ══════════════════════════════════════════════════════ */
-function StepRegister({ onSuccess }: { onSuccess: (email: string) => void }) {
+function StepRegister({ onSuccess }: { onSuccess: (email: string, role: 'donor' | 'ngo') => void }) {
+  const toast                 = useToast();
   const [form, setForm]       = useState({ firstName: '', lastName: '', email: '', password: '' });
+  const [role, setRole]       = useState<'donor' | 'ngo'>('donor');
   const [showPwd, setShowPwd] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,20 +59,33 @@ function StepRegister({ onSuccess }: { onSuccess: (email: string) => void }) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!terms) return setError("Vous devez accepter les conditions d'utilisation.");
-    if (form.password.length < 8) return setError('Le mot de passe doit faire au moins 8 caractères.');
+    if (!terms) {
+      const errMsg = "Vous devez accepter les conditions d'utilisation.";
+      setError(errMsg);
+      toast.error(errMsg);
+      return;
+    }
+    if (form.password.length < 8) {
+      const errMsg = 'Le mot de passe doit faire au moins 8 caractères.';
+      setError(errMsg);
+      toast.error(errMsg);
+      return;
+    }
     setLoading(true);
+    const toastId = toast.loading('Inscription en cours...');
     try {
       const res  = await fetch(`${API}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, role }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Erreur serveur.');
-      onSuccess(form.email);
+      toast.success('Compte créé ! Code OTP envoyé par email.', { id: toastId });
+      onSuccess(form.email, role);
     } catch (err: any) {
       setError(err.message);
+      toast.error(err.message, { id: toastId });
     } finally {
       setLoading(false);
     }
@@ -81,22 +97,62 @@ function StepRegister({ onSuccess }: { onSuccess: (email: string) => void }) {
         <p className="text-[11px] font-bold tracking-[0.28em] uppercase text-[#aaa] mb-2">Étape 1 / 2</p>
         <h1 className="text-[26px] font-medium leading-tight text-[#1a1a1a]">
           Créez votre compte{' '}
-          <em className="font-['Cormorant_Garamond'] italic" style={{ color: BG }}>Qrowd.</em>
+          <em className="font-['Cormorant_Garamond'] italic" style={{ color: BG }}>
+            {role === 'ngo' ? 'ONG.' : 'Donateur.'}
+          </em>
         </h1>
+        <p className="text-[13px] text-[#666] mt-2">
+          {role === 'ngo'
+            ? 'Inscrivez votre organisation pour lever des fonds et publier vos campagnes.'
+            : 'Rejoignez-nous pour découvrir des projets solidaires et faire des dons.'}
+        </p>
       </motion.div>
 
       <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
+        {/* Sélecteur de rôle */}
+        <motion.div variants={itemAnim} className="flex flex-col gap-2 mb-2">
+          <label className="text-[11px] font-bold tracking-[0.15em] uppercase text-[#888]">Type de compte</label>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setRole('donor')}
+              className="flex-1 py-4 border-2 transition-all duration-300 text-center flex flex-col items-center justify-center gap-1 cursor-pointer"
+              style={{
+                borderColor: role === 'donor' ? BG : '#d0d0cc',
+                backgroundColor: role === 'donor' ? BG : 'transparent',
+                color: role === 'donor' ? LIME : '#1a1a1a',
+              }}
+            >
+              <span className="text-[12px] font-bold tracking-[0.12em] uppercase">DONATEUR</span>
+              <span className="text-[9px] opacity-60 leading-tight">Particulier / Individu</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setRole('ngo')}
+              className="flex-1 py-4 border-2 transition-all duration-300 text-center flex flex-col items-center justify-center gap-1 cursor-pointer"
+              style={{
+                borderColor: role === 'ngo' ? BG : '#d0d0cc',
+                backgroundColor: role === 'ngo' ? BG : 'transparent',
+                color: role === 'ngo' ? LIME : '#1a1a1a',
+              }}
+            >
+              <span className="text-[12px] font-bold tracking-[0.12em] uppercase">ONG / ASSOC</span>
+              <span className="text-[9px] opacity-60 leading-tight">Organisation caritative</span>
+            </button>
+          </div>
+        </motion.div>
+
         <div className="grid grid-cols-2 gap-4">
           <Field label="Prénom">
             <InputLine focused={focused === 'fn'}>
               <input value={form.firstName} onChange={set('firstName')} {...fo('fn')}
-                className={ic} placeholder="Marie" required />
+                className={ic} placeholder="Aliou" required />
             </InputLine>
           </Field>
           <Field label="Nom">
             <InputLine focused={focused === 'ln'}>
               <input value={form.lastName} onChange={set('lastName')} {...fo('ln')}
-                className={ic} placeholder="Dupont" required />
+                className={ic} placeholder="Diallo" required />
             </InputLine>
           </Field>
         </div>
@@ -149,7 +205,7 @@ function StepRegister({ onSuccess }: { onSuccess: (email: string) => void }) {
           style={{ backgroundColor: BG, color: LIME }}>
           {loading
             ? <><RefreshCw size={14} className="animate-spin" /> Envoi du code…</>
-            : 'CRÉER MON COMPTE'}
+            : role === 'ngo' ? 'CRÉER MON COMPTE ONG' : 'CRÉER MON COMPTE DONATEUR'}
         </motion.button>
       </form>
     </motion.div>
@@ -160,6 +216,7 @@ function StepRegister({ onSuccess }: { onSuccess: (email: string) => void }) {
    Étape 2 — Saisie du code OTP
 ══════════════════════════════════════════════════════ */
 function StepOtp({ email, onVerified }: { email: string; onVerified: (token: string) => void }) {
+  const toast                           = useToast();
   const [digits, setDigits]             = useState(['', '', '', '', '', '']);
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState('');
@@ -193,9 +250,15 @@ function StepOtp({ email, onVerified }: { email: string; onVerified: (token: str
 
   const verify = async () => {
     const otp = digits.join('');
-    if (otp.length < 6) return setError('Saisissez les 6 chiffres du code.');
+    if (otp.length < 6) {
+      const errMsg = 'Saisissez les 6 chiffres du code.';
+      setError(errMsg);
+      toast.error(errMsg);
+      return;
+    }
     setError('');
     setLoading(true);
+    const toastId = toast.loading('Vérification du code...');
     try {
       const res  = await fetch(`${API}/auth/verify-otp`, {
         method: 'POST',
@@ -204,9 +267,11 @@ function StepOtp({ email, onVerified }: { email: string; onVerified: (token: str
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message);
+      toast.success('Validation réussie !', { id: toastId });
       onVerified(data.token);
     } catch (err: any) {
       setError(err.message);
+      toast.error(err.message, { id: toastId });
       setDigits(['', '', '', '', '', '']);
       inputRefs.current[0]?.focus();
     } finally {
@@ -218,6 +283,7 @@ function StepOtp({ email, onVerified }: { email: string; onVerified: (token: str
     if (resendCooldown) return;
     setResendCooldown(true);
     setResent(false);
+    const toastId = toast.loading('Renvoi du code...');
     try {
       await fetch(`${API}/auth/resend-otp`, {
         method: 'POST',
@@ -225,9 +291,11 @@ function StepOtp({ email, onVerified }: { email: string; onVerified: (token: str
         body: JSON.stringify({ email }),
       });
       setResent(true);
+      toast.success('Nouveau code OTP envoyé !', { id: toastId });
       setTimeout(() => setResendCooldown(false), 60000);
     } catch {
       setResendCooldown(false);
+      toast.error('Erreur lors du renvoi du code.', { id: toastId });
     }
   };
 
@@ -326,10 +394,15 @@ export default function RegisterPage() {
   const { login }         = useAuth();
   const [step, setStep]   = useState<1 | 2>(1);
   const [email, setEmail] = useState('');
+  const [role, setRole]   = useState<'donor' | 'ngo'>('donor');
 
   const handleVerified = async (token: string) => {
     await login(token);
-    navigate('/profile');
+    if (role === 'ngo') {
+      navigate('/ngo/onboarding');
+    } else {
+      navigate('/profile');
+    }
   };
 
   return (
@@ -416,7 +489,7 @@ export default function RegisterPage() {
         <div className="max-w-[420px] w-full mx-auto py-10">
           <AnimatePresence mode="wait">
             {step === 1
-              ? <StepRegister onSuccess={em => { setEmail(em); setStep(2); }} />
+              ? <StepRegister onSuccess={(em, r) => { setEmail(em); setRole(r); setStep(2); }} />
               : <StepOtp email={email} onVerified={handleVerified} />
             }
           </AnimatePresence>

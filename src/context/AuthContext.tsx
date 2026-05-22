@@ -17,7 +17,7 @@ export interface AuthUser {
   firstName:      string;
   lastName:       string;
   email:          string;
-  role:           'donor' | 'admin';
+  role:           'donor' | 'admin' | 'ngo';
   avatar:         string | null;
   totalDonated:   number;
   donationsCount: number;

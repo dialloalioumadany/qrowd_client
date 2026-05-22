@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ArrowLeft, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 const BG      = '#183028';
 const LIME    = '#cde877';
@@ -10,11 +11,12 @@ const OFFWHITE= '#f2f1ec';
 const API     = 'http://localhost:5000/api';
 
 const container = { hidden: {}, show: { transition: { staggerChildren: 0.09, delayChildren: 0.25 } } };
-const item      = { hidden: { opacity: 0, y: 22 }, show: { opacity: 1, y: 0, transition: { duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] } } };
+const item      = { hidden: { opacity: 0, y: 22 }, show: { opacity: 1, y: 0, transition: { duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] as any } } };
 
 export default function LoginPage() {
   const navigate              = useNavigate();
   const { login }             = useAuth();
+  const toast                 = useToast();
   const [email, setEmail]     = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
@@ -25,8 +27,14 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!email || !password) return setError('Email et mot de passe requis.');
+    if (!email || !password) {
+      const errMsg = 'Email et mot de passe requis.';
+      setError(errMsg);
+      toast.error(errMsg);
+      return;
+    }
     setLoading(true);
+    const toastId = toast.loading('Connexion en cours...');
     try {
       const res  = await fetch(`${API}/auth/login`, {
         method:  'POST',
@@ -37,15 +45,22 @@ export default function LoginPage() {
 
       /* Email non vérifié → rediriger vers une page d'info */
       if (data.status === 'unverified') {
+        toast.info('Veuillez vérifier votre adresse email.', { id: toastId });
         return navigate('/register', { state: { email, step: 2 } });
       }
 
       if (!res.ok) throw new Error(data.message || 'Identifiants incorrects.');
 
       await login(data.token);
-      navigate('/profile');
+      toast.success('Connexion réussie !', { id: toastId });
+      if (data.data?.user?.role === 'ngo') {
+        navigate('/ngo/profile');
+      } else {
+        navigate('/profile');
+      }
     } catch (err: any) {
       setError(err.message);
+      toast.error(err.message, { id: toastId });
     } finally {
       setLoading(false);
     }
